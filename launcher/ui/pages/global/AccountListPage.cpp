@@ -1,4 +1,3 @@
-@@ -1,164 +1,149 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
  *  Prism Launcher - Minecraft Launcher

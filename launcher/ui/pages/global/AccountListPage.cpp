@@ -85,7 +85,7 @@ AccountListPage::AccountListPage(QWidget* parent) : QMainWindow(parent), ui(new 
 
     // Xbox authentication won't work without a client identifier, so disable the button if it is missing
     if (~APPLICATION->capabilities() & Application::SupportsMSA) {
-        ui->actionAddMicrosoft->setVisible(false);
+        ui->actionAddMicrosoft->setVisible(true);
         ui->actionAddMicrosoft->setToolTip(tr("No Microsoft Authentication client ID was set."));
     }
 }
@@ -140,25 +140,10 @@ void AccountListPage::on_actionAddMicrosoft_triggered()
 
 void AccountListPage::on_actionAddOffline_triggered()
 {
-    if (!m_accounts->anyAccountIsValid()) {
-        QMessageBox::warning(this, tr("Error"),
-                             tr("You must add a Microsoft account that owns Minecraft before you can add an offline account."
-                                "<br><br>"
-                                "If you have lost your account you can contact Microsoft for support."));
-        return;
-    }
-
-    ChooseOfflineNameDialog dialog(tr("Please enter your desired username to add your offline account."), this);
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-
-    if (const MinecraftAccountPtr account = MinecraftAccount::createOffline(dialog.getUsername())) {
-        account->login()->start();  // The task will complete here.
-        m_accounts->addAccount(account);
-        if (m_accounts->count() == 1) {
-            m_accounts->setDefaultAccount(account);
-        }
+    // Doğrudan çevrim dışı hesap diyaloğunu aç
+    OfflineAccountDialog dialog(this);
+    if (dialog.exec() == QDialog::Accepted) {
+        m_accounts->addOfflineAccount(dialog.getUsername());
     }
 }
 

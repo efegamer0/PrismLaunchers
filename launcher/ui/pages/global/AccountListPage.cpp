@@ -138,14 +138,6 @@ void AccountListPage::on_actionAddMicrosoft_triggered()
     }
 }
 
-void AccountListPage::on_actionAddOffline_triggered()
-{
-    // Doğrudan çevrim dışı hesap diyaloğunu aç
-    OfflineAccountDialog dialog(this);
-    if (dialog.exec() == QDialog::Accepted) {
-        m_accounts->addOfflineAccount(dialog.getUsername());
-    }
-}
 
 void AccountListPage::on_actionRemove_triggered()
 {

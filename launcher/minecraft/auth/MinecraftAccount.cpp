@@ -34,88 +34,70 @@
  */
 
 #include "MinecraftAccount.h"
+#include "AccountData.h"
+#include "Parsers.h"
 
-#include <QDir>
-#include <QIcon>
 #include <QUuid>
 #include <QDebug>
 
-#include "Application.h"
-#include "FileSystem.h"
-
-#include "tasks/Task.h"
-
 MinecraftAccount::MinecraftAccount(QObject* parent) : QObject(parent)
 {
-    m_internalId = QUuid::createUuid().toString();
+    m_data.internalId = QUuid::createUuid().toString();
 }
 
 MinecraftAccountPtr MinecraftAccount::createOffline(const QString& username)
 {
     MinecraftAccountPtr account(new MinecraftAccount());
-    account->m_type = AccountType::Offline;
-    account->m_profileName = username;
-    account->m_profileId = "OfflinePlayer:" + username;
-    account->m_yggdrasilToken = "OfflineToken";
-    account->m_accessToken = "OfflineToken";
-    account->m_validity = AccountState::Online;
+    account->m_data.type = AccountType::Offline;
+    account->m_data.profileName = username;
+    account->m_data.profileId = "OfflinePlayer:" + username;
+    account->m_data.yggdrasilToken = "OfflineToken";
+    account->m_data.accessToken = "OfflineToken";
+    account->m_data.validity = AccountState::Online;
     return account;
 }
 
 MinecraftAccountPtr MinecraftAccount::loadFromJsonV3(const QJsonObject& json)
 {
     MinecraftAccountPtr account(new MinecraftAccount());
-    if (account->loadFromJsonV3Internal(json)) {
+    if (Parsers::readAccountData(json, account->m_data)) {
         return account;
     }
     return nullptr;
 }
 
+QJsonObject MinecraftAccount::saveToJsonV3() const
+{
+    return Parsers::writeAccountData(m_data);
+}
+
 bool MinecraftAccount::shouldRefresh() const
 {
-    if (m_type == AccountType::Offline) {
+    if (m_data.type == AccountType::Offline) {
         return false;
     }
-    return m_validity != AccountState::Online;
+    return m_data.validity != AccountState::Online;
 }
 
 QPixmap MinecraftAccount::getFace(int width, int height) const
 {
-    if (!m_face.isNull()) {
-        return m_face.scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    if (!m_data.face.isNull()) {
+        return m_data.face.scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     return QPixmap();
 }
 
 shared_qobject_ptr<AuthFlow> MinecraftAccount::refresh()
 {
-    if (m_type == AccountType::Offline) {
-        m_validity = AccountState::Online;
+    if (m_data.type == AccountType::Offline) {
+        m_data.validity = AccountState::Online;
         emit changed();
         return nullptr;
     }
     return m_currentTask;
 }
 
-shared_qobject_ptr<AuthFlow> MinecraftAccount::login()
-{
-    return m_currentTask;
-}
-
 shared_qobject_ptr<AuthFlow> MinecraftAccount::currentTask()
 {
     return m_currentTask;
-}
-
-void MinecraftAccount::authSucceeded()
-{
-    m_validity = AccountState::Online;
-    emit changed();
-}
-
-void MinecraftAccount::authFailed(const QString& reason)
-{
-    qWarning() << "Account authentication failed:" << reason;
-    m_validity = AccountState::Errored;
-    emit changed();
 }

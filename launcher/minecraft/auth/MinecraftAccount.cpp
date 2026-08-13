@@ -20,8 +20,6 @@
  *
  *      Copyright 2013-2021 MultiMC Contributors
  *
- *      Authors: Orochimarufan <orochimarufan.x3@gmail.com>
- *
  *      Licensed under the Apache License, Version 2.0 (the "License");
  *      you may not use this file except in compliance with the License.
  *      You may obtain a copy of the License at
@@ -36,254 +34,124 @@
  */
 
 #include "MinecraftAccount.h"
+#include "AccountData.h"
 
-#include <QColor>
-#include <QCryptographicHash>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QRegularExpression>
-#include <QStringList>
+#include <QDir>
+#include <QIcon>
 #include <QUuid>
 
-#include <QDebug>
+#include "Application.h"
+#include "FileSystem.h"
+#include "IconList.h"
 
-#include <QPainter>
+#include "tasks/Task.h"
 
-#include "minecraft/auth/AccountData.h"
-#include "minecraft/auth/AuthFlow.h"
-
-MinecraftAccount::MinecraftAccount(QObject* parent) : QObject(parent)
+MinecraftAccount::MinecraftAccount(QObject* parent) : QObject(parent), m_data(new AccountData)
 {
-    data.internalId = QUuid::createUuid().toString(QUuid::Id128);
+    m_data->internalId = QUuid::createUuid().toString();
+}
+
+MinecraftAccountPtr MinecraftAccount::createOffline(const QString& username)
+{
+    MinecraftAccountPtr account(new MinecraftAccount());
+    account->m_data->type = AccountType::Offline;
+    account->m_data->profileName = username;
+    account->m_data->profileId = "OfflinePlayer:" + username;
+    account->m_data->yggdrasilToken = "OfflineToken";
+    account->m_data->accessToken = "OfflineToken";
+    account->m_data->validity = AccountState::Online;
+    return account;
 }
 
 MinecraftAccountPtr MinecraftAccount::loadFromJsonV3(const QJsonObject& json)
 {
     MinecraftAccountPtr account(new MinecraftAccount());
-    if (account->data.resumeStateFromV3(json)) {
+    if (account->m_data->loadFromJsonV3(json)) {
         return account;
     }
     return nullptr;
 }
 
-MinecraftAccountPtr MinecraftAccount::createBlankMSA()
-{
-    MinecraftAccountPtr account(new MinecraftAccount());
-    account->data.type = AccountType::MSA;
-    return account;
-}
-
-MinecraftAccountPtr MinecraftAccount::createOffline(const QString& username)
-{
-    auto account = makeShared<MinecraftAccount>();
-    account->data.type = AccountType::Offline;
-    account->data.yggdrasilToken.token = "0";
-    account->data.yggdrasilToken.validity = Validity::Certain;
-    account->data.yggdrasilToken.issueInstant = QDateTime::currentDateTimeUtc();
-    account->data.yggdrasilToken.extra["userName"] = username;
-    account->data.yggdrasilToken.extra["clientToken"] = QUuid::createUuid().toString(QUuid::Id128);
-    account->data.minecraftProfile.id = uuidFromUsername(username).toString(QUuid::Id128);
-    account->data.minecraftProfile.name = username;
-    account->data.minecraftProfile.validity = Validity::Certain;
-    return account;
-}
-
 QJsonObject MinecraftAccount::saveToJson() const
 {
-    return data.saveState();
+    return m_data->saveToJson();
+}
+
+QString MinecraftAccount::internalId() const
+{
+    return m_data->internalId;
+}
+
+AccountType MinecraftAccount::accountType() const
+{
+    return m_data->type;
 }
 
 AccountState MinecraftAccount::accountState() const
 {
-    return data.accountState;
+    return m_data->validity;
 }
 
-QPixmap MinecraftAccount::getFace(int width, int height) const
+QString MinecraftAccount::profileName() const
 {
-    QPixmap skinTexture;
-    if (!skinTexture.loadFromData(data.minecraftProfile.skin.data, "PNG")) {
-        return QPixmap();
-    }
-    QPixmap skin = QPixmap(8, 8);
-    skin.fill(QColorConstants::Transparent);
-    QPainter painter(&skin);
-    painter.drawPixmap(0, 0, skinTexture.copy(8, 8, 8, 8));
-    painter.drawPixmap(0, 0, skinTexture.copy(40, 8, 8, 8));
-    return skin.scaled(width, height, Qt::KeepAspectRatio);
+    return m_data->profileName;
 }
 
-shared_qobject_ptr<AuthFlow> MinecraftAccount::login(bool useDeviceCode)
+QString MinecraftAccount::profileId() const
 {
-    Q_ASSERT(m_currentTask.get() == nullptr);
-
-    m_currentTask.reset(new AuthFlow(&data, useDeviceCode ? AuthFlow::Action::DeviceCode : AuthFlow::Action::Login));
-    connect(m_currentTask.get(), &Task::succeeded, this, &MinecraftAccount::authSucceeded);
-    connect(m_currentTask.get(), &Task::failed, this, &MinecraftAccount::authFailed);
-    connect(m_currentTask.get(), &Task::aborted, this, [this] { authFailed(tr("Aborted")); });
-    emit activityChanged(true);
-    return m_currentTask;
+    return m_data->profileId;
 }
 
-shared_qobject_ptr<AuthFlow> MinecraftAccount::refresh()
+QString MinecraftAccount::accessToken() const
 {
-    if (accountType() == AccountType::Offline) {
-        return nullptr;
-    }
-
-    if (m_currentTask) {
-        return m_currentTask;
-    }
-
-    m_currentTask.reset(new AuthFlow(&data, AuthFlow::Action::Refresh));
-
-    connect(m_currentTask.get(), &Task::succeeded, this, &MinecraftAccount::authSucceeded);
-    connect(m_currentTask.get(), &Task::failed, this, &MinecraftAccount::authFailed);
-    connect(m_currentTask.get(), &Task::aborted, this, [this] { authFailed(tr("Aborted")); });
-    emit activityChanged(true);
-    return m_currentTask;
-}
-
-void MinecraftAccount::authFailed(QString reason)
-{
-    switch (m_currentTask->taskState()) {
-        case AccountTaskState::STATE_OFFLINE:
-        case AccountTaskState::STATE_DISABLED: {
-            // NOTE: user will need to fix this themselves.
-        }
-        case AccountTaskState::STATE_FAILED_SOFT: {
-            // NOTE: this doesn't do much. There was an error of some sort.
-        } break;
-        case AccountTaskState::STATE_FAILED_HARD: {
-            if (accountType() == AccountType::MSA) {
-                data.msaToken.token = QString();
-                data.msaToken.refresh_token = QString();
-                data.msaToken.validity = Validity::None;
-                data.validity_ = Validity::None;
-            } else {
-                data.yggdrasilToken.token = QString();
-                data.yggdrasilToken.validity = Validity::None;
-                data.validity_ = Validity::None;
-            }
-            emit changed();
-        } break;
-        case AccountTaskState::STATE_FAILED_GONE: {
-            data.validity_ = Validity::None;
-            emit changed();
-        } break;
-        case AccountTaskState::STATE_WORKING: {
-            data.accountState = AccountState::Unchecked;
-        } break;
-        case AccountTaskState::STATE_CREATED:
-        case AccountTaskState::STATE_SUCCEEDED: {
-            // Not reachable here, as they are not failures.
-        }
-    }
-    m_currentTask.reset();
-    emit activityChanged(false);
-}
-
-QString MinecraftAccount::displayName() const
-{
-    if (const QList validStates{ AccountState::Unchecked, AccountState::Working, AccountState::Offline, AccountState::Online }; !validStates.contains(accountState())) {
-        return QString("⚠ %1").arg(profileName());
-    }
-    return profileName();
-}
-
-bool MinecraftAccount::isActive() const
-{
-    return !m_currentTask.isNull();
+    return m_data->accessToken;
 }
 
 bool MinecraftAccount::shouldRefresh() const
 {
-    /*
-     * Never refresh accounts that are being used by the game, it breaks the game session.
-     * Always refresh accounts that have not been refreshed yet during this session.
-     * Don't refresh broken accounts.
-     * Refresh accounts that would expire in the next 12 hours (fresh token validity is 24 hours).
-     */
-    if (isInUse()) {
+    if (m_data->type == AccountType::Offline) {
         return false;
     }
-    switch (data.validity_) {
-        case Validity::Certain: {
-            break;
-        }
-        case Validity::None: {
-            return false;
-        }
-        case Validity::Assumed: {
-            return true;
-        }
-    }
-    auto now = QDateTime::currentDateTimeUtc();
-    auto issuedTimestamp = data.yggdrasilToken.issueInstant;
-    auto expiresTimestamp = data.yggdrasilToken.notAfter;
-
-    if (!expiresTimestamp.isValid()) {
-        expiresTimestamp = issuedTimestamp.addSecs(24 * 3600);
-    }
-    if (now.secsTo(expiresTimestamp) < (12 * 3600)) {
-        return true;
-    }
-    return false;
+    return m_data->validity != AccountState::Online;
 }
 
-void MinecraftAccount::fillSession(AuthSessionPtr session)
+QPixmap MinecraftAccount::getFace(int width, int height) const
 {
-    // volatile auth token
-    session->access_token = data.accessToken();
-    // profile name
-    session->player_name = data.profileName();
-    // profile ID
-    session->uuid = data.profileId();
-    if (session->uuid.isEmpty())
-        session->uuid = uuidFromUsername(session->player_name).toString(QUuid::Id128);
-    // 'legacy' or 'mojang', depending on account type
-    session->user_type = typeString();
-    if (!session->access_token.isEmpty()) {
-        session->session = "token:" + data.accessToken() + ":" + data.profileId();
-    } else {
-        session->session = "-";
+    if (!m_data->face.isNull()) {
+        return m_data->face.scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
+    return QPixmap();
 }
 
-void MinecraftAccount::decrementUses()
+shared_qobject_ptr<AuthFlow> MinecraftAccount::refresh()
 {
-    Usable::decrementUses();
-    if (!isInUse()) {
+    if (m_data->type == AccountType::Offline) {
+        m_data->validity = AccountState::Online;
         emit changed();
-        // FIXME: we now need a better way to identify accounts...
-        qWarning() << "Profile" << data.profileId() << "is no longer in use.";
+        return nullptr;
     }
+    return m_currentTask;
 }
 
-void MinecraftAccount::incrementUses()
+shared_qobject_ptr<AuthFlow> MinecraftAccount::login()
 {
-    bool wasInUse = isInUse();
-    Usable::incrementUses();
-    if (!wasInUse) {
-        emit changed();
-        // FIXME: we now need a better way to identify accounts...
-        qWarning() << "Profile" << data.profileId() << "is now in use.";
-    }
+    return m_currentTask;
 }
 
-QUuid MinecraftAccount::uuidFromUsername(QString username)
+shared_qobject_ptr<AuthFlow> MinecraftAccount::currentTask()
 {
-    auto input = QString("OfflinePlayer:%1").arg(username).toUtf8();
+    return m_currentTask;
+}
 
-    // basically a reimplementation of Java's UUID#nameUUIDFromBytes
-    QByteArray digest = QCryptographicHash::hash(input, QCryptographicHash::Md5);
+void MinecraftAccount::authSucceeded()
+{
+    m_data->validity = AccountState::Online;
+    emit changed();
+}
 
-    auto bOr = [](QByteArray& array, qsizetype index, uint8_t value) { array[index] |= value; };
-    auto bAnd = [](QByteArray& array, qsizetype index, uint8_t value) { array[index] &= value; };
-    bAnd(digest, 6, 0x0f);  // clear version
-    bOr(digest, 6, 0x30);   // set to version 3
-    bAnd(digest, 8, 0x3f);  // clear variant
-    bOr(digest, 8, 0x80);   // set to IETF variant
-
-    return QUuid::fromRfc4122(digest);
+void MinecraftAccount::authFailed(const QString& reason)
+{
+    qWarning() << "Account authentication failed:" << reason;
+    m_data->validity = AccountState::Errored;
+    emit changed();
 }

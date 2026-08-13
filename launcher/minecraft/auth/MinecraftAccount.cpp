@@ -127,6 +127,10 @@ shared_qobject_ptr<AuthFlow> MinecraftAccount::login(bool useDeviceCode)
 
 shared_qobject_ptr<AuthFlow> MinecraftAccount::refresh()
 {
+    if (accountType() == AccountType::Offline) {
+        return nullptr;
+    }
+
     if (m_currentTask) {
         return m_currentTask;
     }
@@ -138,18 +142,6 @@ shared_qobject_ptr<AuthFlow> MinecraftAccount::refresh()
     connect(m_currentTask.get(), &Task::aborted, this, [this] { authFailed(tr("Aborted")); });
     emit activityChanged(true);
     return m_currentTask;
-}
-
-shared_qobject_ptr<AuthFlow> MinecraftAccount::currentTask()
-{
-    return m_currentTask;
-}
-
-void MinecraftAccount::authSucceeded()
-{
-    m_currentTask.reset();
-    emit changed();
-    emit activityChanged(false);
 }
 
 void MinecraftAccount::authFailed(QString reason)

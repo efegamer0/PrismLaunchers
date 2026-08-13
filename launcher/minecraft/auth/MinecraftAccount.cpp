@@ -39,10 +39,10 @@
 #include <QDir>
 #include <QIcon>
 #include <QUuid>
+#include <QDebug>
 
 #include "Application.h"
 #include "FileSystem.h"
-#include "IconList.h"
 
 #include "tasks/Task.h"
 

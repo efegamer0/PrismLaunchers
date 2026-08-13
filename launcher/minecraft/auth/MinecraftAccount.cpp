@@ -14,23 +14,6 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- * This file incorporates work covered by the following copyright and
- * permission notice:
- *
- *      Copyright 2013-2021 MultiMC Contributors
- *
- *      Licensed under the Apache License, Version 2.0 (the "License");
- *      you may not use this file except in compliance with the License.
- *      You may obtain a copy of the License at
- *
- *          http://www.apache.org/licenses/LICENSE-2.0
- *
- *      Unless required by applicable law or agreed to in writing, software
- *      distributed under the License is distributed on an "AS IS" BASIS,
- *      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *      See the License for the specific language governing permissions and
- *      limitations under the License.
  */
 
 #include "MinecraftAccount.h"
@@ -42,55 +25,55 @@
 
 MinecraftAccount::MinecraftAccount(QObject* parent) : QObject(parent)
 {
-    m_data.internalId = QUuid::createUuid().toString();
+    m_accountData.internalId = QUuid::createUuid().toString();
 }
 
 MinecraftAccountPtr MinecraftAccount::createOffline(const QString& username)
 {
     MinecraftAccountPtr account(new MinecraftAccount());
-    account->m_data.type = AccountType::Offline;
-    account->m_data.profileName = username;
-    account->m_data.profileId = "OfflinePlayer:" + username;
-    account->m_data.yggdrasilToken = "OfflineToken";
-    account->m_data.accessToken = "OfflineToken";
-    account->m_data.validity = AccountState::Online;
+    account->m_accountData.type = AccountType::Offline;
+    account->m_accountData.profileName = username;
+    account->m_accountData.profileId = "OfflinePlayer:" + username;
+    account->m_accountData.yggdrasilToken = "OfflineToken";
+    account->m_accountData.accessToken = "OfflineToken";
+    account->m_accountData.validity = AccountState::Online;
     return account;
 }
 
 MinecraftAccountPtr MinecraftAccount::loadFromJsonV3(const QJsonObject& json)
 {
     MinecraftAccountPtr account(new MinecraftAccount());
-    if (Parsers::readAccountData(json, account->m_data)) {
+    if (Parsers::parseAccountData(json, account->m_accountData)) {
         return account;
     }
     return nullptr;
 }
 
-QJsonObject MinecraftAccount::saveToJsonV3() const
+QJsonObject MinecraftAccount::saveToJson() const
 {
-    return Parsers::writeAccountData(m_data);
+    return Parsers::serializeAccountData(m_accountData);
 }
 
 bool MinecraftAccount::shouldRefresh() const
 {
-    if (m_data.type == AccountType::Offline) {
+    if (m_accountData.type == AccountType::Offline) {
         return false;
     }
-    return m_data.validity != AccountState::Online;
+    return m_accountData.validity != AccountState::Online;
 }
 
 QPixmap MinecraftAccount::getFace(int width, int height) const
 {
-    if (!m_data.face.isNull()) {
-        return m_data.face.scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    if (!m_accountData.face.isNull()) {
+        return m_accountData.face.scaled(width, height, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     return QPixmap();
 }
 
 shared_qobject_ptr<AuthFlow> MinecraftAccount::refresh()
 {
-    if (m_data.type == AccountType::Offline) {
-        m_data.validity = AccountState::Online;
+    if (m_accountData.type == AccountType::Offline) {
+        m_accountData.validity = AccountState::Online;
         emit changed();
         return nullptr;
     }
